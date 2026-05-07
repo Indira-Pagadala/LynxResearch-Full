@@ -87,6 +87,11 @@ async def scout_agent(state: ResearchState) -> dict:
     unique_docs = unique_docs[:50]
 
     logger.info(f"[Scout] {len(unique_docs)} unique documents after dedup")
+    if not unique_docs:
+        raise RuntimeError(
+            "Scout collected zero source documents. "
+            "Please retry after checking search API quota/keys."
+        )
     await emit_progress(
         run_id, "scout", 60,
         f"{len(unique_docs)} documents. Saving to database..."

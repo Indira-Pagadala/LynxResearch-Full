@@ -146,7 +146,7 @@ const ReportViewer = () => {
               <FileDown className="h-3 w-3" /> Export PDF
             </button>
           </div>
-          <ReportPreviewPane markdown={report.markdown} />
+          <ReportPreviewPane markdown={report.markdown} enableImageZoom={false} />
         </main>
       </div>
     </div>

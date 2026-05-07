@@ -2,8 +2,8 @@ import { Link } from "react-router-dom";
 import { CircleDot, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { listRuns } from "@/lib/api";
-import { formatDistanceToNow } from "date-fns";
 import { useWorkspace } from "@/lib/WorkspaceProvider";
+import { formatISTTimestamp } from "@/lib/time";
 
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -61,7 +61,7 @@ const Runs = () => {
                 <div className="col-span-2 text-xs text-muted-foreground">{capitalize(r.report_style)}</div>
                 <div className="col-span-2 text-right text-sm font-mono">{r.progress}%</div>
                 <div className="col-span-2 text-right text-xs text-muted-foreground">
-                  {formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}
+                  {formatISTTimestamp(r.created_at)}
                 </div>
               </Link>
             ))

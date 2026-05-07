@@ -161,7 +161,7 @@ async def execute_research_pipeline(
                 if not final_markdown:
                     raise ValueError("No final markdown content generated")
 
-                pdf_path = await build_pdf(run_id, final_markdown)
+                pdf_path = await build_pdf(run_id, final_markdown, report_style=report_style)
                 if not pdf_path:
                     raise ValueError("PDF generation failed")
 

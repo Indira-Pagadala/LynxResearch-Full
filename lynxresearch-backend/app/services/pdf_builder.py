@@ -5,6 +5,7 @@ import logging
 import uuid
 from pathlib import Path
 from typing import Optional
+from html import unescape as _html_unescape
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -225,17 +226,20 @@ class MarkdownParser:
     - Page break hints (after cover/TOC)
     """
 
-    def __init__(self, styles: dict):
+    def __init__(self, styles: dict, *, enable_links: bool = True):
         self.styles = styles
         self.elements: list = []
         self._figure_counter = 0
         self._in_table_block: list[str] = []
         self._in_exec_summary = False
         self._in_references = False
+        self._reference_ids: set[str] = set()
+        self._enable_links = enable_links
 
     # ── Public entry point ────────────────────────────────────
     def parse(self, markdown_text: str) -> list:
         self.elements = []
+        self._reference_ids = self._extract_reference_ids(markdown_text)
         lines = markdown_text.split("\n")
         i = 0
 
@@ -300,7 +304,7 @@ class MarkdownParser:
             if bullet_match:
                 text = self._inline_format(bullet_match.group(1))
                 self.elements.append(
-                    Paragraph(f"• {text}", self.styles["Bullet"])
+                    self._safe_paragraph(f"• {text}", self.styles["Bullet"])
                 )
                 i += 1
                 continue
@@ -309,14 +313,15 @@ class MarkdownParser:
             num_match = re.match(r"^(\d+)\.\s+(.+)$", line.strip())
             if num_match:
                 num = num_match.group(1)
-                text = self._inline_format(num_match.group(2))
                 if self._in_references:
+                    text = num_match.group(2).strip()
                     self.elements.append(
-                        Paragraph(self._format_reference_entry(num, text), self.styles["Bullet"])
+                        self._safe_paragraph(self._format_reference_entry(num, text), self.styles["Bullet"])
                     )
                 else:
+                    text = self._inline_format(num_match.group(2))
                     self.elements.append(
-                        Paragraph(f"{num}. {text}", self.styles["Bullet"])
+                        self._safe_paragraph(f"{num}. {text}", self.styles["Bullet"])
                     )
                 i += 1
                 continue
@@ -332,7 +337,7 @@ class MarkdownParser:
                     else "Body"
                 )
                 self.elements.append(
-                    Paragraph(formatted, self.styles[style_key])
+                    self._safe_paragraph(formatted, self.styles[style_key])
                 )
 
             i += 1
@@ -342,6 +347,49 @@ class MarkdownParser:
             self._flush_table()
 
         return self.elements
+
+    def _safe_paragraph(self, text: str, style):
+        """
+        ReportLab's paraparser is strict. Never let a malformed inline tag
+        crash the entire PDF build. Try to render; if it fails, strip tags and retry;
+        if still too large/unparseable, chunk into multiple paragraphs.
+        """
+        try:
+            return Paragraph(text, style)
+        except Exception:
+            plain = re.sub(r"<[^>]+>", "", text)
+            plain = _html_unescape(plain)
+            try:
+                return Paragraph(plain, style)
+            except Exception:
+                chunks: list[str] = []
+                s = plain
+                max_len = 1400
+                while len(s) > max_len:
+                    cut = s.rfind(". ", 0, max_len)
+                    if cut < 200:
+                        cut = max_len
+                    chunks.append(s[:cut].strip())
+                    s = s[cut:].strip()
+                if s:
+                    chunks.append(s)
+                flow = [Paragraph(c, style) for c in chunks if c]
+                return KeepTogether(flow)
+
+    def _extract_reference_ids(self, markdown_text: str) -> set[str]:
+        refs: set[str] = set()
+        in_references = False
+        for line in markdown_text.splitlines():
+            heading_match = re.match(r"^(#{1,3})\s+(.+)$", line.strip())
+            if heading_match:
+                in_references = heading_match.group(2).strip().lower() == "references"
+                continue
+            if not in_references:
+                continue
+            ref_match = re.match(r"^(\d+)\.\s+", line.strip())
+            if ref_match:
+                refs.add(ref_match.group(1))
+        return refs
 
     # ── Heading handler ───────────────────────────────────────
     def _add_heading(self, text: str, level: int):
@@ -517,15 +565,18 @@ class MarkdownParser:
         <sup>[N]</sup> → <super><font size=7 color=#1565C0>[N]</font></super>
         [ref:KEY] → (stripped, already resolved by validator)
         """
-        # Normalize any inline citation anchors to clean [N] text.
-        text = re.sub(r'<a\s+href="#ref-(\d+)">\[?(\d+)\]?</a>', r'[\1]', text, flags=re.IGNORECASE)
+        text = _sanitize_pdf_inline(text)
+
+        # Normalize citation anchors to plain [N] before rebuilding PDF-safe links.
+        text = re.sub(r'<a\s+href="#ref-(\d+)">\[?(\d+)\]?</a>', r"[\1]", text, flags=re.IGNORECASE)
         text = re.sub(r"\[(\d+)\]\(#ref-\d+\)", r"[\1]", text)
         # Convert markdown links before escaping.
-        text = re.sub(
-            r"\[([^\]]+)\]\((https?://[^)]+)\)",
-            r'<a href="\2">\1</a>',
-            text,
-        )
+        if self._enable_links:
+            text = re.sub(
+                r"\[([^\]]+)\]\((https?://[^)]+)\)",
+                r'<a href="\2">\1</a>',
+                text,
+            )
         # Strip html anchors used by web report for in-page jumps.
         text = re.sub(r"<a id=\"[^\"]+\"></a>", "", text)
 
@@ -545,8 +596,7 @@ class MarkdownParser:
             r'<a href="\1">\2</a>',
             text,
         )
-        # Drop any unsupported/non-http anchors to avoid raw-tag leakage in PDF output.
-        text = re.sub(r'<a\s+href="#[^"]+">([^<]+)</a>', r"\1", text, flags=re.IGNORECASE)
+        # Drop explicit anchor name tags in body text.
         text = re.sub(r"<a\s+name=\"[^\"]+\"/?>", "", text, flags=re.IGNORECASE)
 
         # **bold**
@@ -554,18 +604,24 @@ class MarkdownParser:
         # *italic*
         text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
 
-        # Citation superscripts  <sup>[N]</sup>
+        # Citation markers: render clean [N] as clickable internal links.
         text = re.sub(
             r"&lt;super&gt;\[(\d+)\]&lt;/super&gt;",
-            r'<super><font size="7" color="#1565C0">[\1]</font></super>',
+            r"[\1]",
             text,
         )
-        # Also handle already-replaced <super> tags
         text = re.sub(
             r"<super>\[(\d+)\]</super>",
-            r'<super><font size="7" color="#1565C0">[\1]</font></super>',
+            r"[\1]",
             text,
         )
+        def _citation_link(match: re.Match[str]) -> str:
+            ref_num = match.group(1)
+            if self._enable_links and ref_num in self._reference_ids:
+                return f'<font color="#1565C0"><a href="#ref-{ref_num}">[{ref_num}]</a></font>'
+            return f"[{ref_num}]"
+
+        text = re.sub(r"\[(\d+)\]", _citation_link, text)
 
         # Strip leftover [ref:KEY] that validator missed
         text = re.sub(r"\[ref:[^\]]+\]", "", text)
@@ -578,17 +634,54 @@ class MarkdownParser:
         [N] Title of article
         with title clickable when a source URL is available.
         """
-        url_match = re.search(r"(https?://\S+)", text)
+        # Strip pre-rendered anchor/link tags so we can rebuild a clean single-link reference line.
+        plain = re.sub(r"</?a[^>]*>", "", text, flags=re.IGNORECASE)
+        plain = re.sub(r"</?font[^>]*>", "", plain, flags=re.IGNORECASE)
+        plain = _html_unescape(plain)
+
+        url_match = re.search(r"(https?://[^\s)]+)", plain)
         url = url_match.group(1).rstrip(").,;") if url_match else ""
-        cleaned = re.sub(r"\s*\[Link\]\(https?://[^)]+\)\s*", "", text).strip()
+        cleaned = re.sub(r"\s*\[Link\]\(https?://[^)]+\)\s*", "", plain, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"\s*Link\s*[—:-]\s*https?://\S+\s*", " ", cleaned, flags=re.IGNORECASE).strip()
         cleaned = re.sub(r"\s*Retrieved from\s+https?://\S+\s*$", "", cleaned, flags=re.IGNORECASE).strip()
-        if url and cleaned:
-            return f"[{num}] <a href=\"{url}\">{cleaned}</a>"
-        return f"[{num}] {cleaned or text}"
+        cleaned = re.sub(r"(https?://\S+)", "", cleaned).strip(" .;,-")
+        anchor = f'<a name="ref-{num}"/>'
+        if url:
+            title = cleaned or re.sub(r"(https?://\S+)", "", plain).strip(" .;,-")
+            if self._enable_links:
+                return f'{anchor}[{num}] {title}. Retrieved from <font color="#1565C0"><a href="{url}">{url}</a></font>'
+            return f"{anchor}[{num}] {title}. Retrieved from {url}"
+        return f"{anchor}[{num}] {cleaned or plain}"
+
+
+def _sanitize_pdf_inline(text: str) -> str:
+    """
+    Remove/neutralize malformed HTML that can crash ReportLab paraparser.
+    - No nested anchors
+    - No internal anchors produced by LLM (we control refs/citations ourselves)
+    - Drop unknown tags; keep content
+    """
+    if not text:
+        return text
+
+    # Remove any explicit <a ...>...</a> internal links (LLMs sometimes emit broken ones).
+    text = re.sub(r'<a\s+[^>]*href\s*=\s*"#?ref-\d+"[^>]*>.*?</a>', r"", text, flags=re.IGNORECASE | re.DOTALL)
+
+    # Remove any <a ...> that contains another <a ...> (nested anchors).
+    text = re.sub(r"<a\b[^>]*>[^<]*<a\b[^>]*>.*?</a>.*?</a>", r"", text, flags=re.IGNORECASE | re.DOTALL)
+
+    # Remove orphan <a ...> start tags or end tags.
+    text = re.sub(r"<\s*/\s*a\s*>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<\s*a\b[^>]*>", "", text, flags=re.IGNORECASE)
+
+    # Strip other potentially problematic tags but keep their inner content.
+    text = re.sub(r"</?(div|span|section|article|header|footer|nav|main|aside|figure|figcaption)\b[^>]*>", "", text, flags=re.IGNORECASE)
+
+    return text
 
 
 # ── Cover page builder ────────────────────────────────────────
-def _build_cover_page(topic: str, styles: dict) -> list:
+def _build_cover_page(topic: str, styles: dict, report_style: Optional[str] = None) -> list:
     """Returns flowables for a professional cover page."""
     elements = []
     elements.append(Spacer(1, 3 * cm))
@@ -623,10 +716,12 @@ def _build_cover_page(topic: str, styles: dict) -> list:
 
     # Info box
     from datetime import datetime
-    date_str = datetime.utcnow().strftime("%B %d, %Y")
+    from zoneinfo import ZoneInfo
+    date_str = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%B %d, %Y")
     info_data = [
         ["Report Date", date_str],
         ["Classification", "Research Report"],
+        ["Report Style/Category", (report_style or "general").replace("_", " ").title()],
         ["Generated By", "LynxResearch AI System"],
     ]
     info_table = Table(info_data, colWidths=[5 * cm, 11 * cm])
@@ -653,7 +748,7 @@ def _build_cover_page(topic: str, styles: dict) -> list:
 
 
 # ── Main public function ──────────────────────────────────────
-async def build_pdf(run_id: str, markdown_content: str) -> Optional[str]:
+async def build_pdf(run_id: str, markdown_content: str, report_style: Optional[str] = None) -> Optional[str]:
     """
     Main entry point called from runs.py background task.
     Converts the full markdown report → professional PDF using ReportLab.
@@ -693,15 +788,23 @@ async def build_pdf(run_id: str, markdown_content: str) -> Optional[str]:
         all_elements = []
 
         # 1. Cover page
-        all_elements.extend(_build_cover_page(topic, styles))
+        all_elements.extend(_build_cover_page(topic, styles, report_style=report_style))
 
-        # 2. Parse markdown body
-        parser = MarkdownParser(styles)
-        body_elements = parser.parse(content_without_title)
-        all_elements.extend(body_elements)
+        def _build_attempt(enable_links: bool) -> None:
+            all_elements_local = []
+            all_elements_local.extend(_build_cover_page(topic, styles, report_style=report_style))
+            parser = MarkdownParser(styles, enable_links=enable_links)
+            body_elements = parser.parse(content_without_title)
+            all_elements_local.extend(body_elements)
+            doc.build(all_elements_local, canvasmaker=NumberedCanvas)
 
-        # 3. Build PDF with numbered canvas
-        doc.build(all_elements, canvasmaker=NumberedCanvas)
+        # 2/3. Build PDF (retry once with links disabled)
+        try:
+            _build_attempt(enable_links=True)
+        except Exception as e:
+            logger.error(f"[PDFBuilder] First build attempt failed: {e}", exc_info=True)
+            logger.warning("[PDFBuilder] Retrying PDF build with links disabled (safe mode)")
+            _build_attempt(enable_links=False)
 
         file_size_mb = pdf_path.stat().st_size / (1024 * 1024)
         logger.info(f"✅ PDF built: {pdf_path} ({file_size_mb:.2f} MB)")

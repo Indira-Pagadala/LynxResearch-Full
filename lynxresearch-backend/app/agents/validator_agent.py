@@ -3,10 +3,12 @@
 import re
 import logging
 import uuid
+from sqlalchemy import select
 from app.agents.state import ResearchState
 from app.utils.progress_emitter import emit_progress
 from app.database import AsyncSessionLocal
 from app.models.citation import Citation
+from app.models.document import ScrapedDocument
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -72,6 +74,8 @@ async def validator_agent(state: ResearchState) -> dict:
     def replace_citation(match):
         nonlocal counter
         key = match.group(1)
+        if key not in resolved:
+            return ""
         if key not in key_to_number:
             key_to_number[key] = counter
             counter += 1
@@ -94,9 +98,7 @@ async def validator_agent(state: ResearchState) -> dict:
             )
 
     # ── Build references section ──────────────────────────────
-    references_md = _build_references_section(
-        key_to_number, resolved, unresolved_keys
-    )
+    references_md = _build_references_section(key_to_number, resolved)
 
     # Replace or append references section
     if re.search(r"#+\s*References", validated_content, re.IGNORECASE):
@@ -210,7 +212,6 @@ def _make_citation(key: str, url: str, title: str, year: str | None) -> dict:
 def _build_references_section(
     key_to_number: dict[str, int],
     resolved: dict[str, dict],
-    unresolved: list[str],
 ) -> str:
     lines = ["## References\n"]
     sorted_keys = sorted(key_to_number.items(), key=lambda x: x[1])
@@ -222,20 +223,6 @@ def _build_references_section(
                 f"{num}. {resolved[key]['apa_string']} "
                 f"[Link]({url})"
             )
-        else:
-            # ── Clean fallback for hallucinated citations ──────
-            # Parse something readable from the key itself
-            # e.g. NASSCOM_2024 → NASSCOM (2024)
-            parts    = key.split("_")
-            org      = parts[0]
-            year     = parts[-1] if len(parts) > 1 and parts[-1].isdigit() else "n.d."
-            # Build a clean note instead of an ugly error
-            lines.append(
-                f"{num}. {org}. ({year}). "
-                f"*{org} Research Report*. "
-                f"[Source referenced in analysis — full URL unavailable in this run]"
-            )
-
     return "\n".join(lines)
 
 
@@ -257,10 +244,20 @@ def _run_quality_checks(content: str) -> list[str]:
 async def _save_citations(run_id: str, resolved: dict, docs: list[dict]):
     async with AsyncSessionLocal() as db:
         try:
+            run_uuid = uuid.UUID(run_id)
+            rows = await db.execute(
+                select(ScrapedDocument.id, ScrapedDocument.url).where(ScrapedDocument.run_id == run_uuid)
+            )
+            url_to_doc_id = {url: doc_id for doc_id, url in rows.all() if url}
+
             for key, data in resolved.items():
+                url = data.get("url", "")
+                document_id = url_to_doc_id.get(url)
+                if not document_id:
+                    continue
                 db.add(Citation(
-                    run_id=uuid.UUID(run_id),
-                    document_id=None,
+                    run_id=run_uuid,
+                    document_id=document_id,
                     citation_key=key,
                     apa_string=data.get("apa_string"),
                 ))
@@ -311,7 +308,7 @@ def _replace_bracket_mentions_with_citations(
 ) -> str:
     for mention, key in mention_to_key.items():
         if key not in key_to_number:
-            key_to_number[key] = len(key_to_number) + 1
+            continue
         num = key_to_number[key]
         content = re.sub(
             rf"(?<!\()(\[{re.escape(mention)}\])",

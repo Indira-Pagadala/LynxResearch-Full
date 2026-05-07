@@ -68,13 +68,31 @@ Rules:
 
 Topic: {topic}"""
 
-    response = await gemini_flash_call(llm, prompt)
-    queries  = [
-        q.strip()
-        for q in response.content.strip().split("\n")
-        if q.strip() and len(q.strip()) > 10
+    try:
+        response = await gemini_flash_call(llm, prompt)
+        queries = [
+            q.strip()
+            for q in response.content.strip().split("\n")
+            if q.strip() and len(q.strip()) > 10
+        ]
+        if queries:
+            return queries[:10]
+    except Exception as e:
+        logger.warning(f"[Search] Gemini query generation failed, using fallback queries: {e}")
+
+    # Fallback for quota/rate-limit failures: keep run grounded with deterministic searches.
+    return [
+        f"{topic} market size statistics",
+        f"{topic} trends 2024 2025",
+        f"{topic} forecast CAGR report",
+        f"{topic} key players analysis",
+        f"{topic} government policy regulation",
+        f"{topic} challenges opportunities",
+        f"{topic} regional breakdown data",
+        f"{topic} case study industry report",
+        f"{topic} latest developments",
+        f"{topic} official data sources",
     ]
-    return queries[:10]
 
 
 async def collect_all_urls(

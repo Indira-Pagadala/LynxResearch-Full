@@ -4,8 +4,8 @@ import { motion } from "framer-motion";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listChatThreads, getChatHistory, chatWithReport, listRuns } from "@/lib/api";
 import { Send, Sparkles, MessagesSquare, ArrowLeft, Clock, Loader2 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 import { useWorkspace } from "@/lib/WorkspaceProvider";
+import { formatISTTimestamp } from "@/lib/time";
 
 const RAGChats = () => {
   const { id } = useParams();
@@ -14,8 +14,8 @@ const RAGChats = () => {
 
   // Thread list: show runs that have chat history + completed runs available for chat
   const { data: threads = [], isLoading: threadsLoading } = useQuery({
-    queryKey: ["chat-threads"],
-    queryFn: listChatThreads,
+    queryKey: ["chat-threads", currentWorkspace?.id],
+    queryFn: () => listChatThreads(currentWorkspace?.id),
   });
 
   const { data: runs = [] } = useQuery({
@@ -56,7 +56,7 @@ const RAGChats = () => {
                       <div className="text-xs text-muted-foreground mt-1 truncate">{c.last_message}</div>
                       <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground font-mono">
                         <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" /> {formatDistanceToNow(new Date(c.updated_at), { addSuffix: true })}
+                          <Clock className="h-3 w-3" /> {formatISTTimestamp(c.updated_at)}
                         </span>
                         <span>·</span>
                         <span>{c.message_count} messages</span>
@@ -122,19 +122,20 @@ function RagChatThread({ runId }: { runId: string }) {
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+  const { currentWorkspace } = useWorkspace();
 
   // Fetch the run info for the title
   const { data: runs = [] } = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => listRuns(50),
+    queryKey: ["runs", currentWorkspace?.id],
+    queryFn: () => listRuns(50, 0, currentWorkspace?.id),
   });
   const run = runs.find(r => r.id === runId);
   const chatTitle = run?.topic || "Research Report";
 
   // Load existing chat history
   const { data: history, isLoading: historyLoading } = useQuery({
-    queryKey: ["chat-history", runId],
-    queryFn: () => getChatHistory(runId),
+    queryKey: ["chat-history", runId, currentWorkspace?.id],
+    queryFn: () => getChatHistory(runId, currentWorkspace?.id),
   });
 
   useEffect(() => {
@@ -164,11 +165,11 @@ function RagChatThread({ runId }: { runId: string }) {
         content: m.content,
       }));
 
-      const response = await chatWithReport(runId, question, conversationHistory);
+      const response = await chatWithReport(runId, question, conversationHistory, currentWorkspace?.id);
       setMessages(prev => [...prev, { role: "assistant", content: response.answer }]);
 
       // Invalidate thread list cache so it updates
-      queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
+      queryClient.invalidateQueries({ queryKey: ["chat-threads", currentWorkspace?.id] });
     } catch (err: any) {
       setMessages(prev => [...prev, {
         role: "assistant",

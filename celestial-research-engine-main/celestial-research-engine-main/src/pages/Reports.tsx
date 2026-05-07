@@ -2,8 +2,8 @@ import { Link } from "react-router-dom";
 import { FileText, FileDown, Eye, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { listRuns, getReportDownloadUrl } from "@/lib/api";
-import { formatDistanceToNow } from "date-fns";
 import { useWorkspace } from "@/lib/WorkspaceProvider";
+import { formatISTTimestamp } from "@/lib/time";
 
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -43,7 +43,7 @@ const Reports = () => {
               <h2 className="font-display text-xl font-semibold leading-snug mb-3 group-hover:text-gold transition">{r.topic}</h2>
               <div className="flex items-center gap-4 text-xs text-muted-foreground mb-5">
                 <span>{r.progress}% complete</span>
-                <span>{formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}</span>
+                <span>{formatISTTimestamp(r.created_at)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Link

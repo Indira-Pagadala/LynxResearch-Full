@@ -102,7 +102,7 @@ const Visualizations = () => {
           <img
             src={`${API_BASE}${zoomChart.url}`}
             alt={zoomChart.filename}
-            className="max-w-[95vw] max-h-[90vh] rounded-lg bg-white p-2"
+            className="max-w-[82vw] max-h-[76vh] rounded-lg bg-white p-2"
           />
         </div>
       )}

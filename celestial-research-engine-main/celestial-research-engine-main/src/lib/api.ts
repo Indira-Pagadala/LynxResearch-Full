@@ -173,20 +173,24 @@ export function getReportDownloadUrl(runId: string): string {
 
 // ── Chat ────────────────────────────────────────────────────
 
-export async function listChatThreads(): Promise<ChatThread[]> {
-  return apiFetch<ChatThread[]>("/chat/threads");
+export async function listChatThreads(workspaceId?: string): Promise<ChatThread[]> {
+  const qs = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  return apiFetch<ChatThread[]>(`/chat/threads${qs}`);
 }
 
-export async function getChatHistory(runId: string): Promise<ChatMessage[]> {
-  return apiFetch<ChatMessage[]>(`/chat/${runId}/history`);
+export async function getChatHistory(runId: string, workspaceId?: string): Promise<ChatMessage[]> {
+  const qs = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  return apiFetch<ChatMessage[]>(`/chat/${runId}/history${qs}`);
 }
 
 export async function chatWithReport(
   runId: string,
   question: string,
   conversationHistory: { role: string; content: string }[] = [],
+  workspaceId?: string,
 ): Promise<{ answer: string; run_id: string }> {
-  return apiFetch<{ answer: string; run_id: string }>(`/chat/${runId}`, {
+  const qs = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  return apiFetch<{ answer: string; run_id: string }>(`/chat/${runId}${qs}`, {
     method: "POST",
     body: JSON.stringify({
       question,

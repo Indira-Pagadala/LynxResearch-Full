@@ -13,6 +13,7 @@ interface Props {
   visibleSections?: number;
   showSkeletons?: boolean;
   showFigure?: boolean;
+  enableImageZoom?: boolean;
 }
 
 // Extract title and abstract from markdown for the header
@@ -67,7 +68,72 @@ function trimToSections(md: string, n: number) {
   return lines.slice(0, endLine).join("\n");
 }
 
-export function ReportPreviewPane({ markdown, title: titleProp, visibleSections, showSkeletons = false, showFigure = true }: Props) {
+function normalizeMarkdownTables(md: string) {
+  const lines = md.split("\n");
+  const normalized: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const isTableLike = (s: string) => (s.match(/\|/g) || []).length >= 2;
+
+    if (!isTableLike(line.trim())) {
+      normalized.push(line);
+      i += 1;
+      continue;
+    }
+
+    const block: string[] = [];
+    let j = i;
+    while (j < lines.length && lines[j].trim() && isTableLike(lines[j].trim())) {
+      block.push(lines[j].trim());
+      j += 1;
+    }
+
+    if (block.length < 2) {
+      normalized.push(line);
+      i += 1;
+      continue;
+    }
+
+    const parseCells = (row: string) => row.replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+    const firstRowCells = parseCells(block[0]);
+    const colCount = Math.max(1, firstRowCells.length);
+    const separatorRegex = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/;
+    const hasSeparator = separatorRegex.test(block[1]);
+
+    const normalizedBlock: string[] = [];
+    normalizedBlock.push(`| ${firstRowCells.join(" | ")} |`);
+    if (hasSeparator) {
+      normalizedBlock.push(
+        `| ${parseCells(block[1]).slice(0, colCount).map(c => (c.includes(":") ? c : "---")).join(" | ")} |`,
+      );
+    } else {
+      normalizedBlock.push(`| ${Array(colCount).fill("---").join(" | ")} |`);
+    }
+
+    const bodyStart = hasSeparator ? 2 : 1;
+    for (let k = bodyStart; k < block.length; k++) {
+      const cells = parseCells(block[k]);
+      while (cells.length < colCount) cells.push("");
+      normalizedBlock.push(`| ${cells.slice(0, colCount).join(" | ")} |`);
+    }
+
+    normalized.push(...normalizedBlock);
+    i = j;
+  }
+
+  return normalized.join("\n");
+}
+
+export function ReportPreviewPane({
+  markdown,
+  title: titleProp,
+  visibleSections,
+  showSkeletons = false,
+  showFigure = true,
+  enableImageZoom = true,
+}: Props) {
   const parsed = markdown ? extractMeta(markdown) : null;
   const displayTitle = parsed?.title || titleProp || "Research Report";
   const displayAbstract = parsed?.abstract || "";
@@ -106,6 +172,7 @@ export function ReportPreviewPane({ markdown, title: titleProp, visibleSections,
   }
 
   const visibleBody = vs < total ? trimToSections(body, vs) : body;
+  const normalizedVisibleBody = normalizeMarkdownTables(visibleBody);
 
   return (
     <article className="glass-strong rounded-2xl p-8 md:p-10">
@@ -201,19 +268,30 @@ export function ReportPreviewPane({ markdown, title: titleProp, visibleSections,
             td: ({ children }) => (
               <td className="px-4 py-2.5 text-sm align-top whitespace-normal break-words">{children}</td>
             ),
-            img: ({ src, alt }) => (
-              <button
-                type="button"
-                className="block my-4 w-full"
-                onClick={() => src && setZoomImage(String(src))}
-              >
-                <img
-                  src={src}
-                  alt={alt || "Report visualization"}
-                  className="max-h-[420px] w-auto mx-auto rounded-lg border border-border/60 cursor-zoom-in"
-                />
-              </button>
-            ),
+            img: ({ src, alt }) => {
+              if (!enableImageZoom) {
+                return (
+                  <img
+                    src={src}
+                    alt={alt || "Report visualization"}
+                    className="w-full max-w-[720px] max-h-[380px] object-contain mx-auto rounded-lg border border-border/60 bg-white/90 my-4"
+                  />
+                );
+              }
+              return (
+                <button
+                  type="button"
+                  className="block my-4 w-full"
+                  onClick={() => src && setZoomImage(String(src))}
+                >
+                  <img
+                    src={src}
+                    alt={alt || "Report visualization"}
+                    className="w-full max-w-[720px] max-h-[380px] object-contain mx-auto rounded-lg border border-border/60 cursor-zoom-in bg-white/90"
+                  />
+                </button>
+              );
+            },
             code: ({ className, children, ...props }) => {
               const isInline = !className;
               if (isInline) {
@@ -262,10 +340,10 @@ export function ReportPreviewPane({ markdown, title: titleProp, visibleSections,
             hr: () => <hr className="my-6 border-border/60" />,
           }}
         >
-          {visibleBody}
+          {normalizedVisibleBody}
         </ReactMarkdown>
       </motion.div>
-      {zoomImage && (
+      {enableImageZoom && zoomImage && (
         <div
           className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-6"
           onClick={() => setZoomImage(null)}
@@ -273,7 +351,7 @@ export function ReportPreviewPane({ markdown, title: titleProp, visibleSections,
           <img
             src={zoomImage}
             alt="Expanded visualization"
-            className="max-w-[95vw] max-h-[90vh] rounded-lg shadow-2xl"
+            className="max-w-[84vw] max-h-[78vh] rounded-lg shadow-2xl object-contain"
           />
         </div>
       )}

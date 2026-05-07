@@ -3,9 +3,9 @@ import { motion } from "framer-motion";
 import { FileText, FlaskConical, Database, Quote, ArrowUpRight, ArrowRight, Plus, CircleDot, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { listRuns, type RunListItem } from "@/lib/api";
-import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/lib/AuthProvider";
 import { useWorkspace } from "@/lib/WorkspaceProvider";
+import { formatISTTimestamp } from "@/lib/time";
 
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -127,7 +127,7 @@ const Dashboard = () => {
                       <span>·</span>
                       <span>{capitalize(r.report_style)}</span>
                       <span>·</span>
-                      <span>{formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}</span>
+                      <span>{formatISTTimestamp(r.created_at)}</span>
                     </div>
                   </div>
                   <div className="hidden md:flex items-center gap-5 text-[11px] text-muted-foreground font-mono">

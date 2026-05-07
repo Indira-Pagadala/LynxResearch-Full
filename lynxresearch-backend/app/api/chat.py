@@ -2,7 +2,7 @@
 
 import uuid
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from app.database import get_db
@@ -20,7 +20,10 @@ router = APIRouter(prefix="/chat", tags=["RAG Chat"])
 
 
 @router.get("/threads", response_model=list[ChatThreadResponse])
-async def list_chat_threads(db: AsyncSession = Depends(get_db)):
+async def list_chat_threads(
+    workspace_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
     """List all runs that have chat messages (i.e. active chat threads)."""
     # Subquery: runs with at least one chat message
     stmt = (
@@ -33,7 +36,7 @@ async def list_chat_threads(db: AsyncSession = Depends(get_db)):
         .subquery()
     )
 
-    result = await db.execute(
+    query = (
         select(
             ResearchRun.id,
             ResearchRun.topic,
@@ -41,8 +44,10 @@ async def list_chat_threads(db: AsyncSession = Depends(get_db)):
             stmt.c.updated_at,
         )
         .join(stmt, ResearchRun.id == stmt.c.run_id)
-        .order_by(desc(stmt.c.updated_at))
     )
+    if workspace_id is not None:
+        query = query.where(ResearchRun.workspace_id == workspace_id)
+    result = await db.execute(query.order_by(desc(stmt.c.updated_at)))
 
     threads = []
     for row in result.all():
@@ -67,10 +72,16 @@ async def list_chat_threads(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{run_id}/history", response_model=list[ChatMessageResponse])
-async def get_chat_history(run_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_chat_history(
+    run_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
     """Get all chat messages for a run, ordered chronologically."""
     run = await db.get(ResearchRun, run_id)
     if not run:
+        raise HTTPException(status_code=404, detail="Research run not found")
+    if workspace_id is not None and run.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Research run not found")
 
     result = await db.execute(
@@ -85,6 +96,7 @@ async def get_chat_history(run_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 async def chat_with_run_report(
     run_id: uuid.UUID,
     request: ChatRequest,
+    workspace_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -95,6 +107,8 @@ async def chat_with_run_report(
     # Verify run exists and is done
     run = await db.get(ResearchRun, run_id)
     if not run:
+        raise HTTPException(status_code=404, detail="Research run not found")
+    if workspace_id is not None and run.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Research run not found")
     if run.status != "done":
         raise HTTPException(

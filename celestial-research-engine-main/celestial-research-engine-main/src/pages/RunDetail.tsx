@@ -11,7 +11,7 @@ import {
   getRunStatus, subscribeToProgress, getReportMarkdown, getReportDownloadUrl,
   listRunDocuments, type ProgressEvent, type DocumentItem,
 } from "@/lib/api";
-import { formatDistanceToNow } from "date-fns";
+import { formatISTTimestamp } from "@/lib/time";
 
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -150,7 +150,7 @@ const RunDetail = () => {
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono mt-0.5">
             <span>{runId.slice(0, 8)}</span><span>·</span><span>{capitalize(run.status === "done" ? "completed" : run.status)}</span><span>·</span>
             <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" /> {formatDistanceToNow(new Date(run.created_at), { addSuffix: true })}
+              <Clock className="h-3 w-3" /> {formatISTTimestamp(run.created_at)}
             </span>
           </div>
         </div>
@@ -214,7 +214,7 @@ const RunDetail = () => {
               <Row k="Run ID" v={runId.slice(0, 8)} mono />
               <Row k="Status" v={isDone ? "Completed" : failed ? "Failed" : capitalize(run.status)} />
               <Row k="Progress" v={`${run.progress}%`} mono />
-              <Row k="Started" v={formatDistanceToNow(new Date(run.created_at), { addSuffix: true })} />
+              <Row k="Started" v={formatISTTimestamp(run.created_at)} />
               <Row k="Sources" v={String(documents.length)} mono />
               <Row k="Stage" v={isDone ? "Run complete" : (stageMessage || STAGE_LABELS[run.current_stage || ""] || (run.current_stage || "—"))} />
             </dl>
