@@ -1,0 +1,57 @@
+# Web Framework
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+
+# Database
+sqlalchemy[asyncio]==2.0.30
+asyncpg==0.29.0
+alembic==1.13.1
+
+# LangChain + LangGraph
+langchain-core==0.2.43
+langchain==0.2.17
+langchain-community==0.2.17
+langchain-google-genai==1.0.10
+langchain-groq==0.1.9
+langgraph==0.2.53
+
+# Google Gemini (must stay <0.6 for langchain-google-genai 1.0.x)
+google-generativeai>=0.5.2,<0.6.0
+
+# Vector DB
+qdrant-client==1.9.1
+sentence-transformers==3.0.0
+
+
+# Search — Tavily (replaces DDG)
+tavily-python==0.3.9
+
+# Web Scraping
+trafilatura==1.8.0
+requests==2.32.3
+httpx==0.27.0
+beautifulsoup4==4.12.3
+
+# PDF / Document Handling
+pymupdf==1.24.5
+# No [cv]: camelot-py[cv] requires pdftopng>=0.2.3 (unpublished on PyPI; only 0.1.0 exists).
+camelot-py==0.11.0
+reportlab==4.2.2
+markdown==3.6
+jinja2==3.1.4
+
+# Data & ML
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.5.0
+statsmodels==0.14.2
+prophet==1.1.5
+
+# Utilities
+python-dotenv==1.0.1
+pydantic-settings==2.2.1
+pyjanitor==0.28.0
+pillow==10.3.0
+aiofiles==23.2.1
+tenacity==8.3.0
